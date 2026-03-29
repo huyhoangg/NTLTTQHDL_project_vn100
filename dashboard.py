@@ -428,7 +428,7 @@ st.markdown(f"""
 <h1 style='background:linear-gradient(90deg,#60a5fa,#a78bfa,#34d399);
 -webkit-background-clip:text;-webkit-text-fill-color:transparent;
 background-clip:text;font-size:1.9rem;margin:0 0 2px'>📊 VN100 Market Dashboard</h1>
-<p style='color:#334155;font-size:.85rem;margin-top:0'>Dữ liệu phiên {D1.date()} — Tương tác đầy đủ</p>
+<p style='color:#334155;font-size:.85rem;margin-top:0'>Dữ liệu phiên {D1.date()}</p>
 """, unsafe_allow_html=True)
 
 c1,c2,c3,c4,c5,c6 = st.columns(6)
