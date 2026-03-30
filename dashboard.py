@@ -4,78 +4,113 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
 
+# ── VÁ LỖI TƯƠNG THÍCH PHIÊN BẢN (Numpy 2.0+ & Pandas 2.0+) ──
+# Các thư viện cũ như dask, lightgbm, pandas bị gãy do tìm gọi các hàm Numpy/Pandas đời cũ đã bị xoá.
+if not hasattr(np, 'unicode_'): np.unicode_ = str
+if not hasattr(np, 'round_'): np.round_ = np.round
+if not hasattr(np, 'float_'): np.float_ = float
+if not hasattr(np, 'int_'): np.int_ = int
+if not hasattr(np, 'bool_'): np.bool_ = bool
+if not hasattr(np, 'object_'): np.object_ = object
+
+try:
+    if not hasattr(pd.core.strings, 'StringMethods'):
+        pd.core.strings.StringMethods = pd.core.strings.accessor.StringMethods
+except Exception:
+    pass
+# ─────────────────────────────────────────────────────────────
+
+import sys
+from pathlib import Path
+
+# ── Kết nối thư viện ModelAPI ────────────────────────────────────────────────
+# Dùng Path(__file__).parent để lấy đường dẫn tương đối (chuẩn Deploy Cloud)
+current_dir = Path(__file__).parent if '__file__' in globals() else Path.cwd()
+test_model_dir = current_dir / "ModelAPI" / "test_model"
+
+if str(test_model_dir) not in sys.path:
+    sys.path.insert(0, str(test_model_dir))
+
+# Sẽ hiển thị lỗi rành mạch trên Streamlit nếu thiếu lightgbm
+from model_apply_api import predict_symbols_from_master_csv, plot_single_symbol_direction
 st.set_page_config(page_title="VN100 Dashboard", page_icon="📈",
                    layout="wide", initial_sidebar_state="expanded")
+
+# ── Lưu cấu hình (Session State) ──────────────────────────────────────────────
+if "w_ret" not in st.session_state: st.session_state.w_ret = 0.5
+if "w_vol" not in st.session_state: st.session_state.w_vol = 0.3
+if "w_volat" not in st.session_state: st.session_state.w_volat = 0.2
+if "vol_spk" not in st.session_state: st.session_state.vol_spk = 1.5
 
 # ── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 html,body,[class*="css"]{font-family:'Inter',sans-serif!important}
-.stApp{background:#0c111d}
-section[data-testid="stSidebar"]{background:#0f1623;border-right:1px solid #1e293b}
+.stApp{background:var(--background-color)} .block-container{padding-top:1rem;padding-bottom:1rem;max-width:98%;} header{display:none!important;}
+section[data-testid="stSidebar"]{background:var(--secondary-background-color);border-right:1px solid rgba(128,128,128,0.1)}
 /* Nav radio styling */
 div[data-testid="stSidebar"] .stRadio>div{gap:4px}
 div[data-testid="stSidebar"] .stRadio label{
     display:block;width:100%;padding:10px 14px;border-radius:10px;
-    cursor:pointer;color:#94a3b8;font-weight:500;font-size:.92rem;
+    cursor:pointer;color:var(--text-color);font-weight:500;font-size:.92rem;
     transition:all .15s;border:1px solid transparent;
 }
-div[data-testid="stSidebar"] .stRadio label:hover{background:#1e293b;color:#e2e8f0}
+div[data-testid="stSidebar"] .stRadio label:hover{background:rgba(128,128,128,0.1)}
 div[data-testid="stSidebar"] .stRadio [data-checked="true"] + label,
 div[data-testid="stSidebar"] .stRadio input:checked + div label{
     background:linear-gradient(135deg,#1d4ed8,#6d28d9);color:#fff;border-color:#3b82f6
 }
 /* Metric cards */
 div[data-testid="metric-container"]{
-    background:linear-gradient(135deg,#131f35,#1a2540);
-    border:1px solid #1e3a5f;border-radius:12px;padding:14px 18px;
-    box-shadow:0 4px 20px rgba(0,0,0,.5);transition:transform .18s,box-shadow .18s
+    background:var(--secondary-background-color);
+    border:1px solid rgba(128,128,128,0.2);border-radius:12px;padding:8px 12px;
+    box-shadow:0 4px 20px rgba(0,0,0,.08);transition:transform .18s,box-shadow .18s
 }
-div[data-testid="metric-container"]:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(37,99,235,.2)}
-div[data-testid="metric-container"] label{color:#7dd3fc!important;font-size:.76rem!important;font-weight:600!important}
-div[data-testid="metric-container"] [data-testid="metric-value"]{color:#f1f5f9!important;font-weight:700!important}
+div[data-testid="metric-container"]:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(37,99,235,.15)}
+div[data-testid="metric-container"] label{color:#3b82f6!important;font-size:.76rem!important;font-weight:600!important}
+div[data-testid="metric-container"] [data-testid="metric-value"]{color:var(--text-color)!important;font-weight:700!important}
 /* Control card in sidebar */
-.ctrl-card{background:#131f35;border:1px solid #1e293b;border-radius:12px;padding:14px;margin-bottom:12px}
-.ctrl-title{color:#60a5fa;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
+.ctrl-card{background:var(--secondary-background-color);border:1px solid rgba(128,128,128,0.2);border-radius:12px;padding:14px;margin-bottom:12px}
+.ctrl-title{color:#3b82f6;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px}
 /* Section header */
-.sh{background:linear-gradient(90deg,rgba(37,99,235,.2),transparent);
+.sh{background:linear-gradient(90deg,rgba(37,99,235,.1),transparent);
     border-left:3px solid #3b82f6;border-radius:0 8px 8px 0;
-    padding:8px 14px;margin:16px 0 10px;color:#93c5fd;font-weight:600;font-size:1rem}
+    padding:8px 14px;margin:16px 0 10px;color:var(--text-color);font-weight:600;font-size:1rem}
 /* Selectbox, slider */
 .stSelectbox>div>div,.stMultiSelect>div>div{
-    background:#131f35!important;border:1px solid #1e3a5f!important;
-    border-radius:8px!important;color:#e2e8f0!important}
+    background:var(--secondary-background-color)!important;border:1px solid rgba(128,128,128,0.2)!important;
+    border-radius:8px!important;color:var(--text-color)!important}
 .stSlider [data-baseweb="slider"] div[role="slider"]{background:#3b82f6!important}
-hr{border-color:#1e293b!important;margin:.8rem 0!important}
-h1,h2,h3{color:#e2e8f0!important}
+hr{border-color:rgba(128,128,128,0.2)!important;margin:.8rem 0!important}
+h1,h2,h3{color:var(--text-color)!important}
 /* Tabs (secondary within page) */
-.stTabs [data-baseweb="tab-list"]{background:#131f35;border-radius:10px;padding:4px;gap:3px;border:1px solid #1e293b}
-.stTabs [data-baseweb="tab"]{border-radius:8px;color:#64748b;font-size:.85rem;padding:6px 14px}
-.stTabs [aria-selected="true"]{background:linear-gradient(135deg,#1d4ed8,#6d28d9)!important;color:#fff!important}
+.stTabs [data-baseweb="tab-list"]{background:var(--secondary-background-color);border-radius:10px;padding:4px;gap:3px;border:1px solid rgba(128,128,128,0.2)}
+.stTabs [data-baseweb="tab"]{border-radius:8px;color:var(--text-color);font-size:.85rem;padding:6px 14px;opacity: 1; font-weight: 500;}
+.stTabs [aria-selected="true"]{background:linear-gradient(135deg,#1d4ed8,#6d28d9)!important;color:#fff!important;opacity: 1;}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-BG = "rgba(0,0,0,0)"; GR = "rgba(255,255,255,.04)"; AX = "#475569"; TX = "#94a3b8"
+BG = "rgba(0,0,0,0)"
 
-def pct_clr(v): return "#34d399" if v>0 else ("#f87171" if v<0 else "#fbbf24")
+def pct_clr(v): return "#10b981" if v>0 else ("#ef4444" if v<0 else "#f59e0b")
 def score_clr(s):
-    if pd.isna(s): return "#6b7280"
-    if s<=-7: return "#22d3ee"
-    if s<-3:  return "#f87171"
+    if pd.isna(s): return "#9ca3af"
+    if s<=-7: return "#06b6d4"
+    if s<-3:  return "#ef4444"
     if s<0:   return "#fca5a5"
-    if s==0:  return "#fbbf24"
-    if s<3:   return "#4ade80"
+    if s==0:  return "#f59e0b"
+    if s<3:   return "#10b981"
     if s<7:   return "#16a34a"
-    return "#a855f7"
+    return "#8b5cf6"
 
 def dl(**kw):
-    """Dark layout preset"""
-    return dict(paper_bgcolor=BG,plot_bgcolor=BG,
-                font=dict(color=TX,family="Inter"),
-                xaxis=dict(gridcolor=GR,color=AX,zerolinecolor=GR),
-                yaxis=dict(gridcolor=GR,color=AX,zerolinecolor=GR),**kw)
+    """Flexible layout preset supporting auto-theming font color"""
+    return dict(
+                font=dict(family="Inter"),
+                margin=kw.pop('margin', dict(t=50,l=10,r=10,b=10)),
+                **kw)
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner="⏳ Đang tải dữ liệu...")
@@ -121,12 +156,12 @@ def fig_treemap(top_n):
         labels=ind["icb_name2"],parents=[""]*len(ind),values=ind["tybnd"],
         text=[f"<b>{r.icb_name2}</b><br>{r.pct:+.2f}%" for _,r in ind.iterrows()],
         textinfo="text",textfont=dict(size=17,color="white"),textposition="middle center",
-        marker=dict(colors=ind["color"],line=dict(color="#0c111d",width=2)),
+        marker=dict(colors=ind["color"],line=dict(color="rgba(128,128,128,0.2)",width=2)),
         hovertemplate="<b>%{label}</b><br>GTGD: %{value:,.0f} tỷ<extra></extra>",
         tiling=dict(pad=3,packing="squarify"),
     ))
-    fig.update_layout(height=500,paper_bgcolor=BG,margin=dict(t=40,l=4,r=4,b=4),
-        title=dict(text=f"🗺️ Bản đồ ngành — {D1.date()}",font=dict(size=18,color="#e2e8f0"),x=.5))
+    fig.update_layout(height=500,margin=dict(t=40,l=4,r=4,b=4),
+        title=dict(text=f"🗺️ Bản đồ ngành — {D1.date()}",font=dict(size=18),x=0))
     return fig
 
 @st.cache_data(show_spinner=False)
@@ -144,8 +179,8 @@ def fig_breadth():
     fig.add_trace(go.Bar(x=bd["date"],y=bd["up"],  name="Tăng",    marker_color="#4ade80",opacity=.85))
     fig.add_trace(go.Bar(x=bd["date"],y=-bd["dn"], name="Giảm",    marker_color="#f87171",opacity=.85))
     fig.add_trace(go.Bar(x=bd["date"],y=bd["ref"], name="Tham chiếu",marker_color="#fbbf24",opacity=.7))
-    fig.update_layout(barmode="relative",height=300,legend=dict(bgcolor=BG,font_color=TX,orientation="h",y=1.1),
-        title=dict(text="📊 Độ rộng thị trường",font=dict(size=15,color="#e2e8f0"),x=0),
+    fig.update_layout(barmode="relative",height=300,legend=dict(orientation="h",y=1.1),
+        title=dict(text="📊 Độ rộng thị trường",font=dict(size=15),x=0),
         **dl(margin=dict(t=50,l=10,r=10,b=10)))
     return fig
 
@@ -158,8 +193,8 @@ def fig_vol_trend():
     fig=go.Figure()
     fig.add_trace(go.Bar(x=vt["date"],y=vt["val"],name="GTGD (nghìn tỷ)",marker_color="#3b82f6",opacity=.7))
     fig.add_trace(go.Scatter(x=vt["date"],y=ma,name="MA5",line=dict(color="#fbbf24",width=2)))
-    fig.update_layout(height=270,legend=dict(bgcolor=BG,font_color=TX),
-        title=dict(text="💰 Giá trị GD toàn thị trường",font=dict(size=15,color="#e2e8f0"),x=0),
+    fig.update_layout(height=270,legend=dict(),
+        title=dict(text="💰 Giá trị GD toàn thị trường",font=dict(size=15),x=0),
         **dl(margin=dict(t=50,l=10,r=10,b=10)),yaxis_title="Nghìn tỷ")
     return fig
 
@@ -172,12 +207,12 @@ def fig_sector_heatmap():
         rows.append(day.groupby("icb_name2")["Daily_Return"].mean())
     heat=pd.DataFrame(rows,index=[d.strftime("%m/%d") for d in recent]).dropna(axis=1,thresh=8)
     fig=go.Figure(go.Heatmap(z=heat.values,x=heat.columns.tolist(),y=heat.index.tolist(),
-        colorscale=[[0,"#ef4444"],[.5,"#111827"],[1,"#22c55e"]],zmid=0,zmin=-3,zmax=3,
-        colorbar=dict(title="Return%",tickfont_color=TX,title_font_color=TX),
+        colorscale=[[0,"#ef4444"],[.5,"rgba(128,128,128,0.1)"],[1,"#22c55e"]],zmid=0,zmin=-3,zmax=3,
+        colorbar=dict(title="Return%"),
         text=np.round(heat.values,1),texttemplate="%{text:.1f}",textfont_size=9))
-    fig.update_layout(height=460,paper_bgcolor=BG,plot_bgcolor=BG,
-        xaxis=dict(color=AX,tickfont_size=10),yaxis=dict(color=AX,tickfont_size=10),
-        title=dict(text="🌡️ Heatmap lợi suất ngành (20 phiên)",font=dict(size=15,color="#e2e8f0"),x=0),
+    fig.update_layout(height=460,
+        xaxis=dict(tickfont_size=10),yaxis=dict(tickfont_size=10),
+        title=dict(text="🌡️ Heatmap lợi suất ngành (20 phiên)",font=dict(size=15),x=0),
         margin=dict(t=50,l=10,r=10,b=100))
     return fig
 
@@ -193,8 +228,8 @@ def fig_sector_bar(period_days):
     label={1:"1 ngày",7:"1 tuần",30:"1 tháng"}.get(period_days,f"{period_days} ngày")
     fig=go.Figure(go.Bar(x=sec["pct"],y=sec["icb_name2"],orientation="h",
         marker=dict(color=[pct_clr(v) for v in sec["pct"]],line_width=0),
-        text=[f"{v:+.2f}%" for v in sec["pct"]],textposition="outside",textfont_color="#e2e8f0"))
-    fig.update_layout(height=420,title=dict(text=f"📊 Hiệu suất ngành — {label}",font=dict(size=15,color="#e2e8f0"),x=0),
+        text=[f"{v:+.2f}%" for v in sec["pct"]],textposition="outside"))
+    fig.update_layout(height=420,title=dict(text=f"📊 Hiệu suất ngành — {label}",font=dict(size=15),x=0),
         **dl(margin=dict(t=50,l=10,r=80,b=10)))
     return fig
 
@@ -209,17 +244,17 @@ def fig_top_table(sort_col, is_value):
     pv=top["pct"].round(2).tolist()
     metric=(top["LS_GiaTriKhopLenh"]/1e9 if is_value else top["LS_KhoiLuongKhopLenh"])
     mlabel="GT (tỷ)" if is_value else "KL (CP)"
-    cc=[["#0c1a2e"]*10,["#0c1a2e"]*10,[pct_clr(v) for v in pv],["#0c1a2e"]*10,["#0c1a2e"]*10]
+    cc=[["rgba(0,0,0,0)"]*10,["rgba(0,0,0,0)"]*10,[pct_clr(v) for v in pv],["rgba(0,0,0,0)"]*10,["rgba(0,0,0,0)"]*10]
     fig=go.Figure(go.Table(
-        header=dict(values=["Mã","Giá","%","±",mlabel],fill_color="#1e3a5f",align="left",
-                    font=dict(color="#7dd3fc",size=13),height=36),
+        header=dict(values=["Mã","Giá","%","±",mlabel],fill_color="rgba(128,128,128,0.2)",align="left",
+                    font=dict(size=13),height=36),
         cells=dict(values=[top["ticker"],top["LS_GiaDongCua_n"].round(0),
                            [f"{v:+.2f}%" for v in pv],top["chg"].round(0),
                            metric.map(lambda x:f"{x:,.1f}" if is_value else f"{x:,.0f}")],
-                   fill_color=cc,align="left",font=dict(color="#e2e8f0",size=13),height=32)))
+                   fill_color=cc,align="left",font=dict(size=13),height=32)))
     title=f"Top 10 {'Giá trị' if is_value else 'Khối lượng'} GD — {D1.date()}"
-    fig.update_layout(height=420,paper_bgcolor=BG,margin=dict(t=44,l=6,r=6,b=6),
-        title=dict(text=title,font=dict(size=14,color="#93c5fd"),x=0))
+    fig.update_layout(height=420,margin=dict(t=44,l=6,r=6,b=6),
+        title=dict(text=title,font=dict(size=14),x=0))
     return fig
 
 @st.cache_data(show_spinner=False)
@@ -238,13 +273,13 @@ def fig_net_chart(is_foreign):
         text=[f"{v:.1f}T" for v in bv],textposition="outside",cliponaxis=False),1,2)
     fig.update_xaxes(range=[amax,0],visible=False,row=1,col=1)
     fig.update_xaxes(range=[0,amax],visible=False,row=1,col=2)
-    fig.update_yaxes(autorange="reversed",side="right",tickfont_color=TX,row=1,col=1)
-    fig.update_yaxes(autorange="reversed",side="left", tickfont_color=TX,row=1,col=2)
-    for a in fig.layout.annotations: a.font.color="#94a3b8"
-    fig.update_layout(height=440,showlegend=False,paper_bgcolor=BG,plot_bgcolor=BG,
+    fig.update_yaxes(autorange="reversed",side="right",row=1,col=1)
+    fig.update_yaxes(autorange="reversed",side="left", row=1,col=2)
+    pass
+    fig.update_layout(height=280,showlegend=False,
         margin=dict(t=80,l=50,r=50,b=10),
         title=dict(text=f"<b>{title} — Mua/Bán ròng</b><br><span style='font-size:12px;color:#475569'>Ngày {D1.date()}</span>",
-                   x=.5,font=dict(size=16,color="#e2e8f0")))
+                   x=.5,font=dict(size=16)))
     return fig
 
 @st.cache_data(show_spinner=False)
@@ -260,47 +295,67 @@ def fig_rank(n_days, ascending):
     m=m.merge(vol,on="ticker",how="left")
     top=m.sort_values("pct",ascending=ascending).head(10)
     pv=top["pct"].round(2).tolist()
-    cc=[["#0c1a2e"]*10,["#0c1a2e"]*10,[pct_clr(v) for v in pv],["#0c1a2e"]*10,["#0c1a2e"]*10]
+    cc=[["rgba(0,0,0,0)"]*10,["rgba(0,0,0,0)"]*10,[pct_clr(v) for v in pv],["rgba(0,0,0,0)"]*10,["rgba(0,0,0,0)"]*10]
     fig=go.Figure(go.Table(
-        header=dict(values=["Mã","Giá","%","±","KL TB"],fill_color="#1e3a5f",align="left",
-                    font=dict(color="#7dd3fc",size=13),height=36),
+        header=dict(values=["Mã","Giá","%","±","KL TB"],fill_color="rgba(128,128,128,0.2)",align="left",
+                    font=dict(size=13),height=36),
         cells=dict(values=[top["ticker"],top["LS_GiaDongCua_n"].round(0),
                            [f"{v:+.2f}%" for v in pv],top["chg"].round(0),
                            top["LS_KhoiLuongKhopLenh"].map(lambda x:f"{x:,.0f}")],
-                   fill_color=cc,align="left",font=dict(color="#e2e8f0",size=13),height=32)))
-    fig.update_layout(height=410,paper_bgcolor=BG,margin=dict(t=10,l=6,r=6,b=6))
+                   fill_color=cc,align="left",font=dict(size=13),height=32)))
+    fig.update_layout(height=410,margin=dict(t=10,l=6,r=6,b=6))
     return fig
 
 @st.cache_data(show_spinner=False)
-def calc_flow(top_n):
-    d=df.copy().sort_values(["ticker","date"])
-    g=d.groupby("ticker",sort=False)
-    d["ret5"]=g["LS_GiaDongCua"].pct_change(5)*100
-    d["typ"]=(d["LS_GiaCaoNhat"]+d["LS_GiaThapNhat"]+d["LS_GiaDongCua"])/3
-    d["rmf"]=d["typ"]*d["LS_KhoiLuongKhopLenh"]
-    tpp=g["typ"].shift(1)
-    d["pmf"]=np.where(d["typ"]>tpp,d["rmf"],0.)
-    d["nmf"]=np.where(d["typ"]<tpp,d["rmf"],0.)
-    d["p14"]=g["pmf"].rolling(14,min_periods=14).sum().reset_index(level=0,drop=True)
-    d["n14"]=g["nmf"].rolling(14,min_periods=14).sum().reset_index(level=0,drop=True)
-    d["mfi"]=100-(100/(1+d["p14"]/d["n14"].replace(0,np.nan)))
-    sp=(d["LS_GiaCaoNhat"]-d["LS_GiaThapNhat"]).replace(0,np.nan)
-    d["mfm"]=((d["LS_GiaDongCua"]-d["LS_GiaThapNhat"])-(d["LS_GiaCaoNhat"]-d["LS_GiaDongCua"]))/sp
-    d["mfm"]=d["mfm"].replace([np.inf,-np.inf],np.nan).fillna(0).clip(-1,1)
-    d["mfv"]=d["mfm"]*d["LS_KhoiLuongKhopLenh"]
-    d["cmf"]=(g["mfv"].rolling(21,min_periods=21).sum()/g["LS_KhoiLuongKhopLenh"].rolling(21,min_periods=21).sum()).reset_index(level=0,drop=True)
-    lat=g.tail(1).copy().dropna(subset=["ret5","mfi","cmf"])
-    lat["score"]=100*(0.5*lat["cmf"].clip(-1,1)+0.3*(lat["mfi"]-50)/50+0.2*lat["ret5"].clip(-10,10)/10)
-    lat=lat.sort_values("score",ascending=False).reset_index(drop=True)
-    top=lat.head(top_n).sort_values("score",ascending=True)
-    colors=[score_clr(v/7) for v in top["score"]]
-    fig=go.Figure(go.Bar(x=top["score"],y=top["ticker"],orientation="h",
-        marker=dict(color=colors,line_width=0),
-        text=[f"{v:.1f}" for v in top["score"]],textposition="outside",textfont_color="#e2e8f0"))
-    fig.update_layout(height=380,title=dict(text="💹 Flow Score — Top dòng tiền mạnh",
-        font=dict(size=15,color="#e2e8f0"),x=0),
-        **dl(margin=dict(t=50,l=10,r=60,b=10)),xaxis_title="Điểm")
-    return fig, lat[["ticker","score","mfi","cmf","ret5"]].head(30).round(2)
+def calc_t3_money_flow_score(w1, w2, w3, spike_th, top_n):
+    d = df.copy()
+    if 'Volatility' not in d.columns:
+        d['Volatility'] = d.groupby('ticker')['Daily_Return'].transform(lambda x: x.rolling(20, min_periods=1).std())
+    if 'Volume_Ratio' not in d.columns:
+        d['VMA_20'] = d.groupby('ticker')['LS_KhoiLuongKhopLenh'].transform(lambda x: x.rolling(20, min_periods=1).mean())
+        d['Volume_Ratio'] = d['LS_KhoiLuongKhopLenh'] / d['VMA_20']
+
+    d_latest = d[d["date"] == D1].copy()
+    d_latest['Daily_Return'] = d_latest['Daily_Return'].fillna(0)
+    d_latest['Volume_Ratio'] = d_latest['Volume_Ratio'].fillna(1)
+    d_latest['Volatility']   = d_latest['Volatility'].fillna(0)
+
+    d_latest['score'] = (w1 * d_latest['Daily_Return']) + \
+                        (w2 * d_latest['Volume_Ratio']) - \
+                        (w3 * d_latest['Volatility'])
+    d_latest = d_latest.sort_values("score", ascending=False).reset_index(drop=True)
+
+    # Khuyến nghị Mua / Bán / Quan sát
+    BUY_SCORE_THRESHOLD = 0.5
+    SELL_RETURN_THRESHOLD = -1.0
+    
+    conditions = [
+        (d_latest['score'] > BUY_SCORE_THRESHOLD) & (d_latest['Volume_Ratio'] >= spike_th) & (d_latest['Daily_Return'] > 0),
+        (d_latest['Daily_Return'] < SELL_RETURN_THRESHOLD) & (d_latest['Volume_Ratio'] > spike_th)
+    ]
+    choices = ['BUY', 'SELL / AVOID']
+    d_latest['recommendation'] = np.select(conditions, choices, default='OBSERVE')
+
+    # Đột biến khối lượng (Spikes)
+    df_spikes = d_latest[d_latest['Volume_Ratio'] >= spike_th].sort_values(by='Volume_Ratio', ascending=True).tail(10)
+    colors_spk = ["#3b82f6"] * len(df_spikes)
+    fig_spike = go.Figure(go.Bar(x=df_spikes["Volume_Ratio"], y=df_spikes["ticker"], orientation="h",
+                                 marker=dict(color=colors_spk, line_width=0),
+                                 text=[f"{v:.1f}x" for v in df_spikes["Volume_Ratio"]], textposition="outside"))
+    fig_spike.update_layout(height=260, title=dict(text=f"🔥 Top Đột Biến KL (Ratio ≥ {spike_th})", font=dict(size=14), x=0),
+                            **dl(margin=dict(t=50,l=10,r=40,b=10)), xaxis_title="Volume Ratio")
+
+    # Flow Score (T+3)
+    top_score = d_latest.head(top_n).sort_values("score", ascending=True)
+    colors_score = [score_clr(v * 2) for v in top_score["score"]]
+    fig_score = go.Figure(go.Bar(x=top_score["score"], y=top_score["ticker"], orientation="h",
+                                 marker=dict(color=colors_score, line_width=0),
+                                 text=[f"{v:.2f}" for v in top_score["score"]], textposition="outside"))
+    fig_score.update_layout(height=260, title=dict(text="💹 Flow Score (T+3) — Dòng tiền thông minh", font=dict(size=14), x=0),
+                            **dl(margin=dict(t=50,l=10,r=40,b=10)), xaxis_title="Điểm T+3")
+
+    table_cols = ["ticker", "score", "Daily_Return", "Volume_Ratio", "Volatility", "recommendation"]
+    return fig_spike, fig_score, d_latest[table_cols]
 
 def make_stock_chart(ticker, n_days):
     ds=df[df["ticker"]==ticker].tail(n_days)
@@ -319,11 +374,11 @@ def make_stock_chart(ticker, n_days):
     if "VMA_20" in ds.columns:
         fig1.add_trace(go.Scatter(x=ds["date"],y=ds["VMA_20"],line=dict(color="#fbbf24",width=1.2),name="VMA20"),2,1)
     fig1.update_layout(height=520,xaxis_rangeslider_visible=False,
-        legend=dict(bgcolor=BG,font_color=TX,orientation="h",y=1.05,x=0),
-        title=dict(text=f"📈 {ticker} — Biểu đồ nến",font=dict(size=16,color="#e2e8f0"),x=0),
+        legend=dict(orientation="h",y=1.05,x=0),
+        title=dict(text=f"📈 {ticker} — Biểu đồ nến",font=dict(size=16),x=0),
         **dl(margin=dict(t=60,l=10,r=10,b=5)))
-    fig1.update_yaxes(gridcolor=GR,color=AX,row=1,col=1)
-    fig1.update_yaxes(gridcolor=GR,color=AX,row=2,col=1)
+    fig1.update_yaxes(row=1,col=1)
+    fig1.update_yaxes(row=2,col=1)
     # RSI
     fig2=None
     if "RSI" in ds.columns:
@@ -337,7 +392,7 @@ def make_stock_chart(ticker, n_days):
             annotation_text="Quá bán (30)",annotation_font_color="#4ade80",annotation_position="top right")
         fig2.add_trace(go.Scatter(x=d2["date"],y=d2["RSI"],line=dict(color="#60a5fa",width=1.8),name="RSI"))
         fig2.update_layout(height=250,yaxis_range=[0,100],
-            title=dict(text="RSI (14)",font=dict(size=14,color="#94a3b8"),x=0),
+            title=dict(text="RSI (14)",font=dict(size=14),x=0),
             **dl(margin=dict(t=40,l=10,r=10,b=5)))
     # MACD
     fig3=None
@@ -349,10 +404,10 @@ def make_stock_chart(ticker, n_days):
         fig3.add_trace(go.Bar(x=d3["date"],y=d3["MACD_Histogram"],name="Histogram",marker_color=ch,opacity=.75))
         fig3.add_trace(go.Scatter(x=d3["date"],y=d3["MACD"],line=dict(color="#60a5fa",width=1.5),name="MACD"))
         fig3.add_trace(go.Scatter(x=d3["date"],y=d3["Signal_Line"],line=dict(color="#f97316",width=1.5),name="Signal"))
-        fig3.update_layout(height=250,
-            title=dict(text="MACD (12,26,9)",font=dict(size=14,color="#94a3b8"),x=0),
-            legend=dict(bgcolor=BG,font_color=TX,orientation="h",y=1.2),
-            **dl(margin=dict(t=50,l=10,r=10,b=5)))
+        fig3.update_layout(height=280,
+            title=dict(text="MACD (12,26,9)",font=dict(size=14),x=0),
+            legend=dict(orientation="h",y=1.1,xanchor='right',x=1),
+            **dl(margin=dict(t=60,l=10,r=10,b=5)))
     return fig1,fig2,fig3
 
 # ════════════════════════════════════════════════════════════════════
@@ -362,8 +417,8 @@ with st.sidebar:
     st.markdown(f"""
     <div style='text-align:center;padding:10px 0 6px'>
       <div style='font-size:1.7rem'>📈</div>
-      <div style='font-size:1.1rem;font-weight:800;color:#f1f5f9'>VN100 Dashboard</div>
-      <div style='font-size:.72rem;color:#475569;margin-top:2px'>{D1.date()} • {len(TICKERS)} cổ phiếu</div>
+      <div style='font-size:1.1rem;font-weight:800;color:var(--text-color)'>VN100 Dashboard</div>
+      <div style='font-size:.72rem;color:var(--text-color);opacity:0.7;margin-top:2px'>{D1.date()} • {len(TICKERS)} cổ phiếu</div>
     </div>
     """, unsafe_allow_html=True)
     st.markdown("---")
@@ -374,6 +429,7 @@ with st.sidebar:
         "💸  Dòng tiền",
         "🏆  Xếp hạng",
         "📈  Phân tích CP",
+        "🤖  Dự đoán T+",
     ], label_visibility="collapsed")
 
     st.markdown("---")
@@ -390,11 +446,7 @@ with st.sidebar:
         sec_days = {"1 Ngày":1,"1 Tuần":7,"1 Tháng":30}[sec_period]
 
     elif PAGE == "💸  Dòng tiền":
-        st.markdown("<div class='ctrl-title'>💹 Flow Score</div>", unsafe_allow_html=True)
-        top_n_flow = st.slider("Số cổ phiếu", 5, 25, 10, key="flow_n")
-        st.markdown("<div class='ctrl-title' style='margin-top:14px'>👁️ Hiển thị</div>", unsafe_allow_html=True)
-        show_nn = st.checkbox("Khối ngoại", value=True)
-        show_td = st.checkbox("Tự doanh",   value=True)
+        pass # All controls moved to main page
 
     elif PAGE == "🏆  Xếp hạng":
         st.markdown("<div class='ctrl-title'>📅 Kỳ xếp hạng</div>", unsafe_allow_html=True)
@@ -416,8 +468,14 @@ with st.sidebar:
         show_rsi  = st.checkbox("RSI (14)", value=True)
         show_macd = st.checkbox("MACD", value=True)
 
+    elif PAGE == "🤖  Dự đoán T+":
+        st.markdown("<div class='ctrl-title'>🤖 Thiết lập mô hình</div>", unsafe_allow_html=True)
+        pred_symbols = st.multiselect("Mã Cổ phiếu (Trống = Top 10)", TICKERS, key="pred_sym")
+        pred_months = st.slider("Kỳ quan sát (tháng)", 1, 36, 24, key="pred_m")
+        run_pred = st.button("🚀 Chạy Dự Đoán", use_container_width=True)
+
     st.markdown("---")
-    st.markdown("<div style='color:#1e293b;font-size:.7rem;text-align:center'>VN100 Dashboard © 2026</div>",
+    st.markdown("<div style='color:var(--text-color);opacity:0.6;font-size:.7rem;text-align:center'>VN100 Dashboard © 2026</div>",
                 unsafe_allow_html=True)
 
 # ════════════════════════════════════════════════════════════════════
@@ -425,10 +483,14 @@ with st.sidebar:
 # ════════════════════════════════════════════════════════════════════
 kpi = kpi_data()
 st.markdown(f"""
-<h1 style='background:linear-gradient(90deg,#60a5fa,#a78bfa,#34d399);
--webkit-background-clip:text;-webkit-text-fill-color:transparent;
-background-clip:text;font-size:1.9rem;margin:0 0 2px'>📊 VN100 Market Dashboard</h1>
-<p style='color:#334155;font-size:.85rem;margin-top:0'>Dữ liệu phiên {D1.date()}</p>
+<div style='display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:12px'>
+    <h1 style='background:linear-gradient(90deg,#60a5fa,#a78bfa,#34d399);
+    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+    background-clip:text;font-size:1.6rem;margin:0'>📊 VN100 Dashboard</h1>
+    <div style='color:var(--text-color);opacity:0.8;font-size:.9rem;font-weight:500'>
+    ⏱️ Phiên: <span style='color:#3b82f6;font-weight:700'>{D1.strftime('%d/%m/%Y')}</span>
+    </div>
+</div>
 """, unsafe_allow_html=True)
 
 c1,c2,c3,c4,c5,c6 = st.columns(6)
@@ -472,18 +534,47 @@ elif PAGE == "📊  Ngành & Giao dịch":
 
 # ── PAGE 3: Dòng tiền ───────────────────────────────────────────
 elif PAGE == "💸  Dòng tiền":
+    st.markdown("### ⚙️ Tuỳ chỉnh mô hình Flow Score (T+3)")
+    st.info("Kéo các thanh trượt bên dưới để thay đổi tỷ trọng các bộ lọc dòng tiền thông minh theo mong muốn của bạn.")
+    
+    # Sliders moved here for less confusing sidebar
+    c1, c2, c3, c4 = st.columns(4)
+    st.session_state.w_ret = c1.slider("🎯 Lợi nhuận (W1)", 0.0, 1.0, float(st.session_state.w_ret), 0.1)
+    st.session_state.w_vol = c2.slider("📦 Khối lượng (W2)", 0.0, 1.0, float(st.session_state.w_vol), 0.1)
+    st.session_state.w_volat = c3.slider("⚖️ Rủi ro (W3)", 0.0, 1.0, float(st.session_state.w_volat), 0.1)
+    st.session_state.vol_spk = c4.slider("🔥 Ngưỡng nổ KL", 1.0, 5.0, float(st.session_state.vol_spk), 0.1)
+    
+    w_ret, w_vol, w_volat, vol_spike_th = st.session_state.w_ret, st.session_state.w_vol, st.session_state.w_volat, st.session_state.vol_spk
+    top_n_flow = 10  # Mặc định top 10
+
+    st.markdown("---")
+
+    fig_spike, fig_score, df_fl = calc_t3_money_flow_score(w_ret, w_vol, w_volat, vol_spike_th, top_n_flow)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.plotly_chart(fig_spike, use_container_width=True)
+    with col2:
+        st.plotly_chart(fig_score, use_container_width=True)
+
+    with st.expander("📋 Bảng chi tiết Flow Score (T+3) Xếp hạng", expanded=True):
+        df_display = df_fl.rename(columns={
+            "ticker":"Mã CP", "score":"T+3 Score", "Daily_Return":"Return (%)", 
+            "Volume_Ratio":"Volume Ratio (x)", "Volatility":"Độ rủi ro", "recommendation":"Khuyến nghị"
+        })
+        num_cols = ["T+3 Score", "Return (%)", "Volume Ratio (x)", "Độ rủi ro"]
+        df_display[num_cols] = df_display[num_cols].round(2)
+        st.dataframe(df_display, use_container_width=True, height=250)
+
+    st.markdown("---")
+    st.markdown("### 🌐 Tra cứu Mua / Bán Ròng")
+    cn1, cn2 = st.columns(2)
+    show_nn = cn1.checkbox("Hiển thị Khối ngoại", value=True)
+    show_td = cn2.checkbox("Hiển thị Tự doanh",   value=False)
+
     if show_nn and "KN_GTDGRong" in df.columns:
         st.plotly_chart(fig_net_chart(True),  use_container_width=True)
-        st.markdown("---")
     if show_td and "TD_GtMua" in df.columns:
         st.plotly_chart(fig_net_chart(False), use_container_width=True)
-        st.markdown("---")
-
-    fig_fl, df_fl = calc_flow(top_n_flow)
-    st.plotly_chart(fig_fl, use_container_width=True)
-    with st.expander("📋 Bảng chi tiết Flow Score"):
-        st.dataframe(df_fl.rename(columns={"mfi":"MFI14","cmf":"CMF21","ret5":"Return 5D%"}),
-                     use_container_width=True, height=300)
 
 # ── PAGE 4: Xếp hạng ────────────────────────────────────────────
 elif PAGE == "🏆  Xếp hạng":
@@ -548,3 +639,44 @@ elif PAGE == "📈  Phân tích CP":
         cols_show=[c for c in cols_show if c in ds.columns]
         st.dataframe(ds[cols_show].sort_values("date",ascending=False).reset_index(drop=True),
                      use_container_width=True, height=280)
+
+# ── PAGE 6: Dự đoán T+ (ML) ─────────────────────────────────────
+elif PAGE == "📋  Dự đoán T+":
+    st.markdown("### 📋 Dự đoán xu hướng T+")
+    st.markdown("<div style='color:var(--text-color);opacity:0.8;margin-bottom:20px'>Hệ thống sử dụng các mô hình LightGBM được huấn luyện sẵn để dự đoán xu hướng T+3, T+7, T+15, và T+30.</div>", unsafe_allow_html=True)
+
+    # Hàm chạy ẩn kết hợp cache bộ nhớ để ko gọi đi gọi lại
+    @st.cache_data(show_spinner=False)
+    def run_ml_pipeline(sym_tuple, months):
+        m_csv = test_model_dir.parent / "dataset.csv"
+        m_dir = test_model_dir.parent / "models"
+        return predict_symbols_from_master_csv(
+            master_csv_path=m_csv,
+            models_dir=m_dir,
+            output_dir=None,
+            mode="recent_months",
+            recent_months=months,
+            symbols=list(sym_tuple) if sym_tuple else None,
+            default_top_symbols=10
+        )
+
+    if run_pred:
+        with st.spinner("⏳ Đang tải dữ liệu và chạy Inference (Vui lòng chờ)..."):
+            try:
+                res = run_ml_pipeline(tuple(pred_symbols), pred_months)
+                
+                # Hiển thị bảng
+                st.markdown("##### 🏆 Bảng Dự Đoán Mới Nhất")
+                st.dataframe(res["latest_selected_symbol_table"].style.format(precision=3), use_container_width=True)
+                
+                # Cột hiển thị hình vẽ matplotlib trực tiếp lên UI (render-on-fly)
+                st.markdown("---")
+                st.markdown("##### 📉 Biểu đồ Tín Hiệu")
+                cols = st.columns(2)
+                for i, sym in enumerate(res["selected_symbols"]):
+                    fig = plot_single_symbol_direction(res, sym)
+                    cols[i % 2].pyplot(fig, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"❌ Xảy ra lỗi khi chạy mô hình: {e}")
+
