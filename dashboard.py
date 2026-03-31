@@ -112,6 +112,13 @@ def dl(**kw):
                 margin=kw.pop('margin', dict(t=50,l=10,r=10,b=10)),
                 **kw)
 
+def fix_date_gaps(fig):
+    """Hide non-trading days (weekends & holidays) while keeping date formatting"""
+    full_range = pd.date_range(start=ALL_DATES[0], end=ALL_DATES[-1])
+    gaps = full_range[~full_range.isin(ALL_DATES)]
+    fig.update_xaxes(rangebreaks=[dict(values=gaps.strftime("%Y-%m-%d").tolist())])
+    return fig
+
 # ── Load data ─────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner="⏳ Đang tải dữ liệu...")
 def load_data():
@@ -182,7 +189,7 @@ def fig_breadth():
     fig.update_layout(barmode="relative",height=300,legend=dict(orientation="h",y=1.1),
         title=dict(text="📊 Độ rộng thị trường",font=dict(size=15),x=0),
         **dl(margin=dict(t=50,l=10,r=10,b=10)))
-    return fig
+    return fix_date_gaps(fig)
 
 @st.cache_data(show_spinner=False)
 def fig_vol_trend():
@@ -196,25 +203,9 @@ def fig_vol_trend():
     fig.update_layout(height=270,legend=dict(),
         title=dict(text="💰 Giá trị GD toàn thị trường",font=dict(size=15),x=0),
         **dl(margin=dict(t=50,l=10,r=10,b=10)),yaxis_title="Nghìn tỷ")
-    return fig
+    return fix_date_gaps(fig)
 
-@st.cache_data(show_spinner=False)
-def fig_sector_heatmap():
-    recent=ALL_DATES[-20:]
-    rows=[]
-    for d in recent:
-        day=df[df["date"]==d]
-        rows.append(day.groupby("icb_name2")["Daily_Return"].mean())
-    heat=pd.DataFrame(rows,index=[d.strftime("%m/%d") for d in recent]).dropna(axis=1,thresh=8)
-    fig=go.Figure(go.Heatmap(z=heat.values,x=heat.columns.tolist(),y=heat.index.tolist(),
-        colorscale=[[0,"#ef4444"],[.5,"rgba(128,128,128,0.1)"],[1,"#22c55e"]],zmid=0,zmin=-3,zmax=3,
-        colorbar=dict(title="Return%"),
-        text=np.round(heat.values,1),texttemplate="%{text:.1f}",textfont_size=9))
-    fig.update_layout(height=460,
-        xaxis=dict(tickfont_size=10),yaxis=dict(tickfont_size=10),
-        title=dict(text="🌡️ Heatmap lợi suất ngành (20 phiên)",font=dict(size=15),x=0),
-        margin=dict(t=50,l=10,r=10,b=100))
-    return fig
+
 
 @st.cache_data(show_spinner=False)
 def fig_sector_bar(period_days):
@@ -379,6 +370,7 @@ def make_stock_chart(ticker, n_days):
         **dl(margin=dict(t=60,l=10,r=10,b=5)))
     fig1.update_yaxes(row=1,col=1)
     fig1.update_yaxes(row=2,col=1)
+    fix_date_gaps(fig1)
     # RSI
     fig2=None
     if "RSI" in ds.columns:
@@ -394,6 +386,7 @@ def make_stock_chart(ticker, n_days):
         fig2.update_layout(height=250,yaxis_range=[0,100],
             title=dict(text="RSI (14)",font=dict(size=14),x=0),
             **dl(margin=dict(t=40,l=10,r=10,b=5)))
+        fix_date_gaps(fig2)
     # MACD
     fig3=None
     cols=["MACD","Signal_Line","MACD_Histogram"]
@@ -408,6 +401,7 @@ def make_stock_chart(ticker, n_days):
             title=dict(text="MACD (12,26,9)",font=dict(size=14),x=0),
             legend=dict(orientation="h",y=1.1,xanchor='right',x=1),
             **dl(margin=dict(t=60,l=10,r=10,b=5)))
+        fix_date_gaps(fig3)
     return fig1,fig2,fig3
 
 # ════════════════════════════════════════════════════════════════════
@@ -427,7 +421,6 @@ with st.sidebar:
         "🏠  Thị trường",
         "📊  Ngành & Giao dịch",
         "💸  Dòng tiền",
-        "🏆  Xếp hạng",
         "📈  Phân tích CP",
         "🤖  Dự đoán T+",
     ], label_visibility="collapsed")
@@ -447,12 +440,6 @@ with st.sidebar:
 
     elif PAGE == "💸  Dòng tiền":
         pass # All controls moved to main page
-
-    elif PAGE == "🏆  Xếp hạng":
-        st.markdown("<div class='ctrl-title'>📅 Kỳ xếp hạng</div>", unsafe_allow_html=True)
-        rk_label = st.radio("Chọn kỳ", ["1 Ngày","1 Tuần","1 Tháng"],
-                            horizontal=False, key="rk_p")
-        rk_days = {"1 Ngày":1,"1 Tuần":7,"1 Tháng":30}[rk_label]
 
     elif PAGE == "📈  Phân tích CP":
         st.markdown("<div class='ctrl-title'>🔍 Chọn cổ phiếu</div>", unsafe_allow_html=True)
@@ -516,9 +503,29 @@ if PAGE == "🏠  Thị trường":
     with c2:
         st.plotly_chart(fig_vol_trend(),    use_container_width=True)
 
+    st.markdown("<div class='sh'>🌐 Giao dịch Khối ngoại & Tự doanh</div>", unsafe_allow_html=True)
+    st.plotly_chart(fig_net_chart(True),  use_container_width=True)
+    st.plotly_chart(fig_net_chart(False), use_container_width=True)
+
+    st.markdown("<div class='sh'>🏆 Xếp hạng cổ phiếu (1 Tuần)</div>", unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("##### 📈 Top tăng giá")
+        f = fig_rank(7, ascending=False)
+        if f: st.plotly_chart(f, use_container_width=True)
+    with col2:
+        st.markdown("##### 📉 Top giảm giá")
+        f = fig_rank(7, ascending=True)
+        if f: st.plotly_chart(f, use_container_width=True)
+
+    st.markdown("<div class='sh'>📊 Top giao dịch phiên gần nhất</div>", unsafe_allow_html=True)
+    col3, col4 = st.columns(2)
+    with col3: st.plotly_chart(fig_top_table("LS_KhoiLuongKhopLenh",False),use_container_width=True)
+    with col4: st.plotly_chart(fig_top_table("LS_GiaTriKhopLenh",True), use_container_width=True)
+
 # ── PAGE 2: Ngành & Giao dịch ───────────────────────────────────
 elif PAGE == "📊  Ngành & Giao dịch":
-    t1, t2, t3 = st.tabs(["📋 Top giao dịch","📊 Hiệu suất ngành","🌡️ Heatmap ngành"])
+    t1, t2 = st.tabs(["📋 Top giao dịch","📊 Hiệu suất ngành"])
 
     with t1:
         col1,col2 = st.columns(2)
@@ -528,9 +535,6 @@ elif PAGE == "📊  Ngành & Giao dịch":
     with t2:
         fig_sb = fig_sector_bar(sec_days)
         if fig_sb: st.plotly_chart(fig_sb, use_container_width=True)
-
-    with t3:
-        st.plotly_chart(fig_sector_heatmap(), use_container_width=True)
 
 # ── PAGE 3: Dòng tiền ───────────────────────────────────────────
 elif PAGE == "💸  Dòng tiền":
@@ -565,35 +569,7 @@ elif PAGE == "💸  Dòng tiền":
         df_display[num_cols] = df_display[num_cols].round(2)
         st.dataframe(df_display, use_container_width=True, height=250)
 
-    st.markdown("---")
-    st.markdown("### 🌐 Tra cứu Mua / Bán Ròng")
-    cn1, cn2 = st.columns(2)
-    show_nn = cn1.checkbox("Hiển thị Khối ngoại", value=True)
-    show_td = cn2.checkbox("Hiển thị Tự doanh",   value=False)
 
-    if show_nn and "KN_GTDGRong" in df.columns:
-        st.plotly_chart(fig_net_chart(True),  use_container_width=True)
-    if show_td and "TD_GtMua" in df.columns:
-        st.plotly_chart(fig_net_chart(False), use_container_width=True)
-
-# ── PAGE 4: Xếp hạng ────────────────────────────────────────────
-elif PAGE == "🏆  Xếp hạng":
-    st.markdown(f"<div class='sh'>Xếp hạng kỳ: <b>{rk_label}</b></div>", unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("##### 📈 Top tăng giá")
-        f = fig_rank(rk_days, ascending=False)
-        if f: st.plotly_chart(f, use_container_width=True)
-    with col2:
-        st.markdown("##### 📉 Top giảm giá")
-        f = fig_rank(rk_days, ascending=True)
-        if f: st.plotly_chart(f, use_container_width=True)
-
-    st.markdown("---")
-    st.markdown("<div class='sh'>Giao dịch phiên gần nhất</div>", unsafe_allow_html=True)
-    col3, col4 = st.columns(2)
-    with col3: st.plotly_chart(fig_top_table("LS_KhoiLuongKhopLenh",False),use_container_width=True)
-    with col4: st.plotly_chart(fig_top_table("LS_GiaTriKhopLenh",True), use_container_width=True)
 
 # ── PAGE 5: Phân tích cổ phiếu ──────────────────────────────────
 elif PAGE == "📈  Phân tích CP":

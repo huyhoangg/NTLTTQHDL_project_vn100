@@ -90,6 +90,8 @@ FEATURE_BASE_COLUMNS = [
 
 def configure_plotting() -> None:
     sns.set_theme(style="whitegrid", context="notebook")
+    plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "Arial", "Inter", "sans-serif"]
+    plt.rcParams["axes.unicode_minus"] = False
     plt.rcParams["figure.facecolor"] = "white"
     plt.rcParams["axes.facecolor"] = "white"
     plt.rcParams["axes.edgecolor"] = "#B0BEC5"
