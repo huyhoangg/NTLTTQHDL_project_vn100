@@ -1619,7 +1619,7 @@ def plot_symbol_direction_dashboard(result: Dict[str, Any]) -> plt.Figure:
                 label="Ensemble",
             )
             latest_row = symbol_df.iloc[-1]
-            title_tail = f"Ensemble mới nhất: {latest_row['direction_ensemble']} | avg_prob_up={latest_row['avg_prob_up']:.3f}"
+            title_tail = f"Ensemble: {latest_row['direction_ensemble']} | avg_prob_up={latest_row['avg_prob_up']:.3f}"
         else:
             latest_row = symbol_df.iloc[-1]
             title_tail = "Không có ensemble"

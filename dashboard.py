@@ -119,7 +119,7 @@ def load_data():
     return df.sort_values(["ticker","date"]).reset_index(drop=True)
 
 df = load_data()
-ALL_DATES = sorted(df["date"].unique())
+ALL_DATES = sorted(pd.to_datetime(df["date"].unique()))
 TICKERS   = sorted(df["ticker"].unique().tolist())
 D1, D0    = ALL_DATES[-1], ALL_DATES[-2]
 
@@ -418,7 +418,7 @@ with st.sidebar:
     <div style='text-align:center;padding:10px 0 6px'>
       <div style='font-size:1.7rem'>📈</div>
       <div style='font-size:1.1rem;font-weight:800;color:var(--text-color)'>VN100 Dashboard</div>
-      <div style='font-size:.72rem;color:var(--text-color);opacity:0.7;margin-top:2px'>{D1.date()} • {len(TICKERS)} cổ phiếu</div>
+      <div style='font-size:.72rem;color:var(--text-color);opacity:0.7;margin-top:2px'>{pd.to_datetime(D1).date()} • {len(TICKERS)} cổ phiếu</div>
     </div>
     """, unsafe_allow_html=True)
     st.markdown("---")
@@ -641,7 +641,7 @@ elif PAGE == "📈  Phân tích CP":
                      use_container_width=True, height=280)
 
 # ── PAGE 6: Dự đoán T+ (ML) ─────────────────────────────────────
-elif PAGE == "📋  Dự đoán T+":
+elif PAGE == "🤖  Dự đoán T+":
     st.markdown("### 📋 Dự đoán xu hướng T+")
     st.markdown("<div style='color:var(--text-color);opacity:0.8;margin-bottom:20px'>Hệ thống sử dụng các mô hình LightGBM được huấn luyện sẵn để dự đoán xu hướng T+3, T+7, T+15, và T+30.</div>", unsafe_allow_html=True)
 
