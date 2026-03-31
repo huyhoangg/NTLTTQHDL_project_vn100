@@ -32,7 +32,7 @@ if str(test_model_dir) not in sys.path:
     sys.path.insert(0, str(test_model_dir))
 
 # Sẽ hiển thị lỗi rành mạch trên Streamlit nếu thiếu lightgbm
-from model_apply_api import predict_symbols_from_master_csv, plot_single_symbol_direction
+from model_apply_api import predict_symbols_from_master_csv, plot_single_symbol_direction, plot_latest_symbol_signal
 st.set_page_config(page_title="VN100 Dashboard", page_icon="📈",
                    layout="wide", initial_sidebar_state="expanded")
 
@@ -645,13 +645,13 @@ elif PAGE == "🤖  Dự đoán T+":
                 st.markdown("##### 🏆 Bảng Dự Đoán Mới Nhất")
                 st.dataframe(res["latest_selected_symbol_table"].style.format(precision=3), use_container_width=True)
                 
-                # Cột hiển thị hình vẽ matplotlib trực tiếp lên UI (render-on-fly)
+
+
                 st.markdown("---")
-                st.markdown("##### 📉 Biểu đồ Tín Hiệu")
-                cols = st.columns(2)
-                for i, sym in enumerate(res["selected_symbols"]):
-                    fig = plot_single_symbol_direction(res, sym)
-                    cols[i % 2].pyplot(fig, use_container_width=True)
+                st.markdown("##### 📊 So sánh 4 Horizon")
+                st.markdown("> *Ghi chú: Thanh màu xanh là xác suất nghiêng về TĂNG (>0.5), thanh màu đỏ là nghiêng về GIẢM (<0.5).*")
+                fig_latest = plot_latest_symbol_signal(res)
+                st.pyplot(fig_latest, use_container_width=True)
 
             except Exception as e:
                 st.error(f"❌ Xảy ra lỗi khi chạy mô hình: {e}")
