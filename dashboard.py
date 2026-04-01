@@ -652,6 +652,10 @@ elif PAGE == "🤖  Dự đoán T+":
                 st.markdown("> *Ghi chú: Thanh màu xanh là xác suất nghiêng về TĂNG (>0.5), thanh màu đỏ là nghiêng về GIẢM (<0.5).*")
                 fig_latest = plot_latest_symbol_signal(res)
                 st.pyplot(fig_latest, use_container_width=True)
+                
+                # Hỗ trợ giải phóng RAM ngay lập tức
+                import gc
+                gc.collect()
 
             except Exception as e:
                 st.error(f"❌ Xảy ra lỗi khi chạy mô hình: {e}")
